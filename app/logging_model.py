@@ -12,4 +12,4 @@ class RequestLog(Base):
     status_code = Column(Integer)
     process_time_ms = Column(Integer)
     user_agent = Column(String)
-    additional_data = Column(JSON)  # For storing login attempts, API usage etc.
+    additional_data = Column(JSON)  # For storing login attempts, API usage etc

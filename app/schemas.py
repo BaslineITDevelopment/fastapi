@@ -49,13 +49,16 @@ class UserOut(BaseModel):
     subscription_plan: str = "free"     
     role: str = "customer"
     permissions: list[str] = ["read"]
+    otp_verified: bool = False  
+    otp_attempts: int = 0  
 
 
     class Config:
         orm_mode = True
 
-
-
+class OTPResponse(BaseModel):
+    otp_verified: bool
+    otp_attempts: int
 
 class Token(BaseModel):
     access_token: str
@@ -184,3 +187,11 @@ class RequestLogSchema(BaseModel):
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+# Add these new schemas
+class OTPCreate(BaseModel):
+    email: EmailStr
+    otp: str
+
+class OTPVerify(BaseModel):
+    email: EmailStr
+    otp: str

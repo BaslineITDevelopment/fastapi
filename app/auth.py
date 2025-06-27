@@ -37,6 +37,9 @@ EMAIL_SECRET = os.getenv("EMAIL_VERIFICATION_SECRET")
 EMAIL_EXPIRE_MINUTES = int(os.getenv("EMAIL_VERIFICATION_EXPIRE_MINUTES", 30))
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_APP_PASSWORD = os.getenv("EMAIL_APP_PASSWORD")
+OTP_SECRET = os.getenv("OTP_SECRET")
+OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", 2))
+OTP_ATTEMPTS_LIMIT = int(os.getenv("OTP_ATTEMPTS_LIMIT", 3))
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -141,26 +144,27 @@ async def get_current_admin(
 
 
 
-def create_email_verification_token(email: str) -> str:
-    expire = datetime.utcnow() + timedelta(minutes=EMAIL_EXPIRE_MINUTES)
-    payload = {"sub": email, "exp": expire}
-    return jwt.encode(payload, EMAIL_SECRET, algorithm="HS256")
+# def create_email_verification_token(email: str) -> str:
+#     expire = datetime.utcnow() + timedelta(minutes=EMAIL_EXPIRE_MINUTES)
+#     payload = {"sub": email, "exp": expire}
+#     return jwt.encode(payload, EMAIL_SECRET, algorithm="HS256")
 
 
-def verify_email_token(token: str) -> str:
-    try:
-        payload = jwt.decode(token, EMAIL_SECRET, algorithms=["HS256"])
-        return payload.get("sub")
-    except JWTError:
-        raise ValueError("Invalid or expired token")
+# def verify_email_token(token: str) -> str:
+#     try:
+#         payload = jwt.decode(token, EMAIL_SECRET, algorithms=["HS256"])
+#         return payload.get("sub")
+#     except JWTError:
+#         raise ValueError("Invalid or expired token")
 
 
-async def send_verification_email(email: str, token: str):
-    msg = MIMEText(f"Click the link to verify your email:\n\nhttp://localhost:8000/verify-email?token={token}")
-    msg["Subject"] = "Email Verification"
-    msg["From"] = EMAIL_SENDER
-    msg["To"] = email
+# async def send_verification_email(email: str, token: str):
+#     msg = MIMEText(f"Click the link to verify your email:\n\nhttp://localhost:8000/verify-email?token={token}")
+#     msg["Subject"] = "Email Verification"
+#     msg["From"] = EMAIL_SENDER
+#     msg["To"] = email
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-        server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
-        server.sendmail(EMAIL_SENDER, [email], msg.as_string())
+#     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+#         server.login(EMAIL_SENDER, EMAIL_APP_PASSWORD)
+#         server.sendmail(EMAIL_SENDER, [email], msg.as_string())
+

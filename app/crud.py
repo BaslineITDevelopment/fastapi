@@ -7,33 +7,7 @@ from . import models, schemas
 from .auth import get_password_hash
 from typing import Union
 
-# async def create_user(db: AsyncSession, user: schemas.UserCreate, role: str = "customer"):
-#     hashed_password = await get_password_hash(user.password)
-#     db_user = models.User(
-#         first_name=user.first_name,
-#         last_name=user.last_name,
-#         username=user.username,
-#         email=user.email,
-#         hashed_password=hashed_password,
-#         company_name=user.company_name,
-#         phone_number=user.phone_number,                  
-#         country=user.country,                            
-#         timezone=user.timezone,                          
-#         subscription_plan=user.subscription_plan or "free",
-#         role=role  
-#     )
-#     db.add(db_user)
-#     await db.commit()
-#     await db.refresh(db_user)
-#     return db_user
 
-# async def update_user(db: AsyncSession, user: models.User, user_update: schemas.UserUpdate):
-#     for field, value in user_update.dict(exclude_unset=True).items():
-#         setattr(user, field, value)
-#     db.add(user)
-#     await db.commit()
-#     await db.refresh(user)
-#     return user
 async def create_user(db: AsyncSession, user: Union[schemas.UserCreate, schemas.CreateUserByAdmin], role: str = "customer"):
     hashed_password = await get_password_hash(user.password)
     db_user = models.User(

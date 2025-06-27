@@ -10,14 +10,14 @@ from .schemas import UserOut
 from .auth import get_current_user
 from .models import User, Admin
 from .database import get_db
-
+import smtplib
 from .auth import get_current_admin
 from fastapi import Body
-
+from datetime import timezone, timedelta
 from app.schemas import LoginRequest, UnifiedLoginResponse
 from app.auth import create_access_token, verify_password, get_password_hash
 from sqlalchemy import select
-
+from zoneinfo import ZoneInfo
 from app import schemas
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
@@ -34,9 +34,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import logging
 from fastapi import Request
 import json
+from zoneinfo import ZoneInfo
 from fastapi.responses import RedirectResponse
 from datetime import datetime
 from app.logging_model import RequestLog
+import random
+from datetime import datetime, timedelta
+from email.mime.text import MIMEText
 
 app = FastAPI()
 
@@ -45,7 +49,7 @@ logger = logging.getLogger(__name__)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"], 
+    allow_origins=["http://localhost:3000","http://170.64.163.105:3001"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -53,7 +57,8 @@ app.add_middleware(
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    start_time = datetime.now()
+    start_time = datetime.now(ZoneInfo("Australia/Sydney"))
+
     
     # Skip logging for documentation endpoints
     if request.url.path in ["/docs", "/openapi.json", "/redoc"]:
@@ -62,7 +67,7 @@ async def log_requests(request: Request, call_next):
     try:
         response = await call_next(request)
     except HTTPException as http_exc:
-        process_time = (datetime.now() - start_time).total_seconds() * 1000
+        process_time = (datetime.now(ZoneInfo("Australia/Sydney")) - start_time).total_seconds() * 1000
         log_data = {
             "timestamp": start_time,
             "method": request.method,
@@ -76,11 +81,11 @@ async def log_requests(request: Request, call_next):
         logger.error(json.dumps({**log_data, "timestamp": log_data["timestamp"].isoformat()}))
         raise http_exc
     except Exception as e:
-        process_time = (datetime.now() - start_time).total_seconds() * 1000
+        process_time = (datetime.now(ZoneInfo("Australia/Sydney"))- start_time).total_seconds() * 1000
         logger.error(f"Request failed: {str(e)}")
         raise
     
-    process_time = (datetime.now() - start_time).total_seconds() * 1000
+    process_time = (datetime.now(ZoneInfo("Australia/Sydney")) - start_time).total_seconds() * 1000
     
     log_data = {
         "timestamp": start_time,
@@ -140,14 +145,211 @@ async def on_startup():
 
 
 
-@app.post("/register", response_model=schemas.UserOut)
+# @app.post("/register", response_model=schemas.UserOut)
+# async def register(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
+#     existing_user = await auth.get_user_by_email(db, user.email)
+#     if existing_user:
+#         raise HTTPException(status_code=400, detail="Email already registered")
+#     return await crud.create_user(db, user, role="customer")
+# Add these endpoints
+# @app.post("/register", response_model=schemas.UserOut)
+# async def register(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
+#     existing_user = await auth.get_user_by_email(db, user.email)
+#     if existing_user:
+#         raise HTTPException(status_code=400, detail="Email already registered")
+    
+#     # Create user but mark as not verified
+#     new_user = await crud.create_user(db, user, role="customer")
+    
+#     # Generate and send OTP
+#     otp = str(random.randint(1000, 9999))
+#     otp_expires = datetime.now() + timedelta(minutes=auth.OTP_EXPIRE_MINUTES)
+    
+#     # Update user with OTP details
+#     new_user.otp_code = otp
+#     new_user.otp_verified = False
+#     new_user.otp_attempts = 0
+#     new_user.otp_expires_at = otp_expires
+#     await db.commit()
+#     await db.refresh(new_user)
+    
+#     # Send OTP email
+#     await send_otp_email(new_user.email, otp)
+    
+#     return new_user
+@app.post("/register", response_model=schemas.UnifiedLoginResponse)
 async def register(user: schemas.UserCreate, db: AsyncSession = Depends(database.get_db)):
     existing_user = await auth.get_user_by_email(db, user.email)
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
-    return await crud.create_user(db, user, role="customer")
+    
+    # Create user but mark as not verified
+    new_user = await crud.create_user(db, user, role="customer")
+    
+    # Generate and send OTP
+    otp = str(random.randint(1000, 9999))
+    # otp_expires = datetime.now() + timedelta(minutes=auth.OTP_EXPIRE_MINUTES)
+    otp_expires = datetime.now(ZoneInfo("Australia/Sydney")) + timedelta(minutes=int(auth.OTP_EXPIRE_MINUTES))
+
+    
+    # Update user with OTP details
+    new_user.otp_code = otp
+    new_user.otp_verified = False
+    new_user.otp_attempts = 0
+    new_user.otp_expires_at = otp_expires
+    await db.commit()
+    await db.refresh(new_user)
+    
+    # Send OTP email
+    await send_otp_email(new_user.email, otp)
+    
+    # Create tokens
+    access_token = auth.create_access_token(data={"sub": new_user.email, "role": new_user.role})
+    refresh_token = auth.create_refresh_token(data={"sub": new_user.email, "role": new_user.role})
+    
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "status": "true",
+        "role": new_user.role,
+        "message": "Registration successful. OTP sent.",
+        "user": schemas.UserOut.model_validate(new_user, from_attributes=True)
+    }
 
 
+async def send_otp_email(email: str, otp: str):
+    msg = MIMEText(f"""Your OTP verification code is: {otp}
+
+This code will expire in {auth.OTP_EXPIRE_MINUTES} minutes.
+
+If you didn't request this, please ignore this email.""")
+    msg["Subject"] = "Your OTP Verification Code"
+    msg["From"] = auth.EMAIL_SENDER
+    msg["To"] = email
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(auth.EMAIL_SENDER, auth.EMAIL_APP_PASSWORD)
+            server.sendmail(auth.EMAIL_SENDER, [email], msg.as_string())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to send OTP email: {str(e)}")
+    return {"message": f"OTP sent to {email}"}
+    
+@app.post("/verify-otp", response_model=schemas.OTPResponse)
+async def verify_otp(otp_data: schemas.OTPVerify, db: AsyncSession = Depends(get_db)):
+    # Get user by email
+    result = await db.execute(select(models.User).where(models.User.email == otp_data.email))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    
+    
+    # Check if OTP is already verified
+    if user.otp_verified:
+        raise HTTPException(status_code=400, detail="OTP already verified")
+    
+    # Check if OTP attempts exceeded
+    # Check if OTP attempts exceeded
+    if user.otp_attempts >= auth.OTP_ATTEMPTS_LIMIT:
+        await db.delete(user)
+        await db.commit()
+        raise HTTPException(status_code=400, detail="Email verification attempt exceeded. Please register again.")
+
+
+
+    
+    # Check if OTP expired
+    if user.otp_expires_at and datetime.now(ZoneInfo("Australia/Sydney")) > user.otp_expires_at.astimezone(ZoneInfo("Australia/Sydney")):
+        raise HTTPException(status_code=400, detail="OTP has expired. Please request a new OTP.")
+    
+    # Verify OTP
+    if user.otp_code != otp_data.otp:
+        # Increment attempt counter
+        user.otp_attempts += 1
+        await db.commit()
+        await db.refresh(user)
+        
+        attempts_left = auth.OTP_ATTEMPTS_LIMIT - user.otp_attempts
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid OTP. {attempts_left} attempts remaining."
+        )
+    
+    # Mark as verified
+    user.otp_verified = True
+    user.otp_code = None  # Clear the OTP after verification
+    await db.commit()
+    await db.refresh(user)
+    
+    return {"otp_verified": True, "otp_attempts": user.otp_attempts}
+
+
+
+@app.post("/resend-otp", response_model=schemas.OTPResponse)
+async def resend_otp(email: str = Body(..., embed=True), db: AsyncSession = Depends(get_db)):
+    # Get user by email
+    result = await db.execute(select(models.User).where(models.User.email == email))
+    user = result.scalar_one_or_none()
+    
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Check if already verified
+    if user.otp_verified:
+        raise HTTPException(status_code=400, detail="OTP already verified")
+    
+    # Check if too many resend attempts
+    if user.otp_attempts >= auth.OTP_ATTEMPTS_LIMIT:
+        wait_time = auth.OTP_EXPIRE_MINUTES
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many attempts. Please wait {wait_time} minutes before requesting a new OTP."
+        )
+    
+    # Generate new OTP
+    otp = str(random.randint(1000, 9999))  
+    # otp_expires = datetime.now() + timedelta(minutes=auth.OTP_EXPIRE_MINUTES)
+    otp_expires = datetime.now(ZoneInfo("Australia/Sydney")) + timedelta(minutes=int(auth.OTP_EXPIRE_MINUTES))
+
+
+    # Update user with new OTP
+    user.otp_code = otp
+    user.otp_attempts = 0  # Reset attempts
+    user.otp_expires_at = otp_expires
+    await db.commit()
+    await db.refresh(user)
+    
+    # Send new OTP email
+    await send_otp_email(user.email, otp)
+    
+    return {"otp_verified": user.otp_verified, "otp_attempts": user.otp_attempts}
+
+# @app.post("/logout")
+# async def logout_user(
+#     current_user: models.User = Depends(auth.get_current_user),
+#     db: AsyncSession = Depends(get_db)
+# ):
+#     """Logout current user by invalidating their token"""
+#     # Verify OTP was completed first
+#     if not current_user.otp_verified:
+#         raise HTTPException(
+#             status_code=status.HTTP_403_FORBIDDEN,
+#             detail="Complete OTP verification first"
+#         )
+
+#     # Invalidate token (implementation depends on your auth system)
+#     # Example 1: Add to blacklist
+#     # token = OAuth2PasswordBearer(tokenUrl="token")
+#     # await auth.add_to_blacklist(token)
+    
+#     # Example 2: Clear user's auth token
+#     current_user.access_token = None
+#     await db.commit()
+
+#     return {"message": "Successfully logged out"}
 
 @app.post("/login", response_model=schemas.UnifiedLoginResponse)
 async def unified_login(
@@ -297,3 +499,16 @@ async def update_any_user(
     await db.commit()
     await db.refresh(user)
     return user
+
+@app.delete("/user/delete/{user_id}", status_code=204)
+async def delete_user(user_id: int, db: AsyncSession = Depends(database.get_db), current_user=Depends(get_current_admin)):
+    result = await db.execute(select(models.User).where(models.User.id == user_id))
+    user = result.scalar_one_or_none()
+
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    await db.delete(user)
+    await db.commit()
+    print(f"User with ID {user_id} deleted successfully.")
+    return JSONResponse(content={"message": "User deleted successfully"}, status_code=200)
